@@ -40,12 +40,33 @@ _VAARDIGHEID_TREFWOORDEN = re.compile(
 
 
 def _reinig_brontekst(tekst: str) -> str:
-    """Verwijdert PDF-artefacten (paginamarkeringen, herhaalde headers)."""
-    tekst = re.sub(r"\n\n--- pagina ---\n\n", "\n\n", tekst)
-    tekst = re.sub(r"VW-\S+\s*/\s*\d+\s*\nlees verder ►{1,3}", "", tekst)
-    tekst = re.sub(r"lees verder ►{1,3}", "", tekst)
-    tekst = re.sub(r"\n{3,}", "\n\n", tekst)
-    return tekst.strip()
+    """Herstelt kolomafbrekingen en verwijdert PDF-artefacten uit bronteksten.
+
+    PDF-extractie levert tekst in smalle kolommen op (elke regel ~6 woorden).
+    Deze functie voegt die fragmentregels samen tot vloeiende alinea's.
+    """
+    # ── Verwijder PDF-rommel ────────────────────────────────────────────────
+    tekst = re.sub(r"--- pagina ---", "", tekst)
+    tekst = re.sub(r"VW-\S+\s*/\s*\d+\s*", "", tekst)
+    tekst = re.sub(r"lees verder\s*►+", "", tekst)
+
+    # ── Verwijder "tekst X" / "figuur X" header-regel bovenaan ─────────────
+    tekst = re.sub(r"(?im)^\s*(?:tekst|figuur|afbeelding)\s+\d+\s*$", "", tekst)
+
+    # ── Splits in blokken op lege regels (echte alinea-grenzen) ────────────
+    blokken = re.split(r"\n{2,}", tekst)
+
+    alineas = []
+    for blok in blokken:
+        regels = [r.strip() for r in blok.splitlines() if r.strip()]
+        if not regels:
+            continue
+        # Voeg kolomfragmenten samen tot één doorlopende alinea
+        alinea = " ".join(regels)
+        alinea = re.sub(r"  +", " ", alinea)
+        alineas.append(alinea)
+
+    return "\n\n".join(alineas).strip()
 
 
 @st.cache_data
@@ -164,10 +185,8 @@ elif st.session_state.stap == "vraag":
     if bronnen:
         for label, tekst in bronnen.items():
             with st.expander(f"📄 {label.capitalize()}", expanded=True):
-                st.markdown(
-                    f"<div style='font-size:0.9em; line-height:1.6;'>{tekst.replace(chr(10), '<br>')}</div>",
-                    unsafe_allow_html=True,
-                )
+                # Render als nette markdown-alinea's (geen <br>-hack)
+                st.markdown(tekst)
         st.markdown("---")
 
     st.markdown(f"**{vraag.vraag_tekst}**")
