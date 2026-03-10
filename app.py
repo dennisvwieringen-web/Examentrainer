@@ -73,12 +73,29 @@ def _reinig_brontekst(tekst: str) -> str:
 
 
 def _reinig_vraag_tekst(tekst: str) -> str:
-    """Verwijdert PDF-artefacten uit vraag-teksten (paginamarkeringen, voetteksten)."""
-    tekst = re.sub(r"--- pagina ---\s*", " ", tekst)
-    tekst = re.sub(r"VW-\S+\s*/\s*\d+\s*", "", tekst)
-    tekst = re.sub(r"lees verder\s*►+\s*", "", tekst)
-    tekst = re.sub(r"\n{3,}", "\n\n", tekst)
-    return tekst.strip()
+    """Verwijdert PDF-artefacten en herstelt kolomafbrekingen in vraag-teksten.
+
+    Dezelfde aanpak als _reinig_brontekst: split op echte alinea-grenzen
+    (\n[ \t]*\n), voeg kolomfragmenten samen tot vloeiende zinnen.
+    """
+    # ── Verwijder PDF-rommel ────────────────────────────────────────────────
+    tekst = re.sub(r"--- pagina ---", "", tekst)
+    tekst = re.sub(r"VW-\S+", "", tekst)                       # "VW-1034-a-o"
+    tekst = re.sub(r"(?m)^\s*\d+\s*/\s*\d+\s*$", "", tekst)   # "8 / 9" paginanr
+    tekst = re.sub(r"lees verder[^\n]*", "", tekst)            # "lees verder ►" etc.
+
+    # ── Splits op alinea-grenzen, voeg kolomfragmenten samen ───────────────
+    blokken = re.split(r"\n[ \t]*\n", tekst)
+    alineas = []
+    for blok in blokken:
+        regels = [r.strip() for r in blok.splitlines() if r.strip()]
+        if not regels:
+            continue
+        alinea = " ".join(regels)
+        alinea = re.sub(r"  +", " ", alinea)
+        alineas.append(alinea)
+
+    return "\n\n".join(alineas).strip()
 
 
 def _als_html(tekst: str, vet: bool = False) -> str:
@@ -86,7 +103,7 @@ def _als_html(tekst: str, vet: bool = False) -> str:
     stijl = "font-weight:600;" if vet else ""
     paragrafen = "".join(
         f"<p style='margin:0 0 0.7em 0;{stijl}'>"
-        f"{_html.escape(p).replace(chr(10), '<br>')}</p>"
+        f"{_html.escape(p.strip()).replace(chr(10), '<br>')}</p>"
         for p in tekst.split("\n\n")
         if p.strip()
     )
@@ -205,7 +222,9 @@ elif st.session_state.stap == "vraag":
     st.subheader(f"Vraag {idx + 1} / {len(pool)}  •  {vraag.domein}")
 
     # ── Bronteksten scheiden: leesbare tekst vs. visueel materiaal ────────
-    bronnen = st.session_state.bronnen_lookup.get(vraag.id, {})
+    # Haal bronnen rechtstreeks uit de @st.cache_data-cache (nooit stale)
+    _, bronnen_lookup = laad_alle_vragen()
+    bronnen = bronnen_lookup.get(vraag.id, {})
     tekst_bronnen = {
         k: v for k, v in bronnen.items()
         if not v.startswith("[FIGUUR") and not v.startswith("[AFBEELDING")
@@ -229,7 +248,7 @@ elif st.session_state.stap == "vraag":
             for label, tekst in tekst_bronnen.items():
                 paragrafen = "".join(
                     f"<p style='margin:0 0 0.85em 0;line-height:1.8;'>"
-                    f"{_html.escape(p).replace(chr(10), '<br>')}</p>"
+                    f"{_html.escape(p.strip()).replace(chr(10), '<br>')}</p>"
                     for p in tekst.split("\n\n")
                     if p.strip()
                 )
