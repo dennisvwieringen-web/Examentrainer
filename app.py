@@ -73,29 +73,32 @@ def _reinig_brontekst(tekst: str) -> str:
 
 
 def _reinig_vraag_tekst(tekst: str) -> str:
-    """Verwijdert PDF-artefacten en herstelt kolomafbrekingen in vraag-teksten.
+    """Verwijdert PDF-artefacten en maakt vraag-tekst leesbaar.
 
-    Dezelfde aanpak als _reinig_brontekst: split op echte alinea-grenzen
-    (\n[ \t]*\n), voeg kolomfragmenten samen tot vloeiende zinnen.
+    Strategie:
+    1. Verwijder PDF-rommel (VW-code, paginanr, lees-verder, pagina-marker).
+    2. Voeg ALLE regels samen tot één doorlopende tekst (geen kolomfragmenten).
+    3. Splits alleen bij echte bronverwijzingen ('Gebruik tekst/tabel/figuur N')
+       zodat de vraagstelling en de contextzin apart als alinea verschijnen.
     """
     # ── Verwijder PDF-rommel ────────────────────────────────────────────────
     tekst = re.sub(r"--- pagina ---", "", tekst)
-    tekst = re.sub(r"VW-\S+", "", tekst)                       # "VW-1034-a-o"
-    tekst = re.sub(r"(?m)^\s*\d+\s*/\s*\d+\s*$", "", tekst)   # "8 / 9" paginanr
-    tekst = re.sub(r"lees verder[^\n]*", "", tekst)            # "lees verder ►" etc.
+    tekst = re.sub(r"VW-\S+", "", tekst)                      # "VW-1034-a-o"
+    tekst = re.sub(r"(?m)^\s*\d+\s*/\s*\d+\s*$", "", tekst)  # "8 / 9" paginanr
+    tekst = re.sub(r"lees verder[^\n]*", "", tekst)           # "lees verder ►" etc.
 
-    # ── Splits op alinea-grenzen, voeg kolomfragmenten samen ───────────────
-    blokken = re.split(r"\n[ \t]*\n", tekst)
-    alineas = []
-    for blok in blokken:
-        regels = [r.strip() for r in blok.splitlines() if r.strip()]
-        if not regels:
-            continue
-        alinea = " ".join(regels)
-        alinea = re.sub(r"  +", " ", alinea)
-        alineas.append(alinea)
+    # ── Voeg alle regels samen (incl. blanco regels = PDF kolomartefact) ───
+    tekst = re.sub(r"[\r\n]+", " ", tekst)   # elke newline-reeks → spatie
+    tekst = re.sub(r" {2,}", " ", tekst)
+    tekst = tekst.strip()
 
-    return "\n\n".join(alineas).strip()
+    # ── Splits op bronverwijzingen: "Gebruik tekst/tabel/figuur/bron N" ────
+    # "Gebruik in je uitleg..." matcht NIET (geen bron-sleutelwoord + cijfer)
+    onderdelen = re.split(
+        r"(?i)(?=gebruik\s+(?:tekst|tabel|figuur|bron)\s+\d)",
+        tekst,
+    )
+    return "\n\n".join(p.strip() for p in onderdelen if p.strip())
 
 
 def _als_html(tekst: str, vet: bool = False) -> str:
@@ -283,23 +286,23 @@ elif st.session_state.stap == "vraag":
     vraag_tekst_schoon = _reinig_vraag_tekst(vraag.vraag_tekst)
 
     with vraag_container:
-        # Eerste alinea(s) = de vraag zelf (vet), rest = context (normaal)
+        # Eerste alinea(s) = de vraag zelf (vet), "Gebruik X." = context (normaal)
         vraag_paras = [p.strip() for p in vraag_tekst_schoon.split("\n\n") if p.strip()]
         vraag_html = ""
-        for i, p in enumerate(vraag_paras):
+        for p in vraag_paras:
             escaped = _html.escape(p).replace(chr(10), "<br>")
-            if i < len(vraag_paras) - 1 or len(vraag_paras) == 1:
-                # Vraag-paragrafen: vet
+            # Context begint in MaWi-examens altijd met "Gebruik " (tekst/tabel/figuur)
+            is_context = p.lower().startswith("gebruik ")
+            if is_context:
+                vraag_html += (
+                    f"<p style='margin:0.5em 0 0.6em 0;font-weight:400;line-height:1.72;"
+                    f"opacity:0.82;border-left:3px solid rgba(128,128,128,0.35);"
+                    f"padding-left:0.85em;'>{escaped}</p>"
+                )
+            else:
                 vraag_html += (
                     f"<p style='margin:0 0 0.65em 0;font-weight:600;line-height:1.75;'>"
                     f"{escaped}</p>"
-                )
-            else:
-                # Laatste alinea als er meerdere zijn: context (iets minder prominent)
-                vraag_html += (
-                    f"<p style='margin:0.3em 0 0.65em 0;font-weight:400;line-height:1.7;"
-                    f"opacity:0.85;font-style:italic;border-left:3px solid rgba(128,128,128,0.4);"
-                    f"padding-left:0.8em;'>{escaped}</p>"
                 )
         st.markdown(
             f'<div style="font-size:1em;margin-bottom:0.5em;">{vraag_html}</div>',
