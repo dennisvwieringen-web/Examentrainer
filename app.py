@@ -91,10 +91,12 @@ def laad_alle_vragen() -> tuple[list[Vraag], dict[str, dict[str, str]]]:
 def filter_vragen(vragen: list[Vraag], domein: str) -> list[Vraag]:
     if domein == "Alle domeinen":
         return vragen
-    if domein == "Vaardigheden":
+    # Strip optionele letter-prefix ("B – Vorming" → "Vorming")
+    basis = domein.split("–")[-1].strip()
+    if basis == "Vaardigheden":
         # Domein A loopt door alle opgaven heen: detecteer op trefwoorden
         return [v for v in vragen if _VAARDIGHEID_TREFWOORDEN.search(v.vraag_tekst)]
-    return [v for v in vragen if v.domein == domein]
+    return [v for v in vragen if v.domein == basis]
 
 
 # ---------------------------------------------------------------------------

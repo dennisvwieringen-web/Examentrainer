@@ -44,9 +44,9 @@ OPENAI_MODEL = "gpt-4o"
 # Domeinen uit de syllabus MaWi VWO (A t/m E)
 # Domein A = Vaardigheden wordt herkend via trefwoorden in de vraagstelling.
 DOMEINEN = [
-    "Vaardigheden",  # A – onderzoeksmethoden, invalshoeken, hypothesen, variabelen
-    "Vorming",       # B – socialisatie, identiteit, cultuur, normen & waarden
-    "Verhouding",    # C – macht, democratie, rechtsstaat, politiek, criminaliteit
-    "Verandering",   # D – modernisering, globalisering, technologie
-    "Binding",       # E – sociale cohesie, groepen, netwerken, ongelijkheid, media
+    "A – Vaardigheden",  # onderzoeksmethoden, invalshoeken, hypothesen, variabelen
+    "B – Vorming",       # socialisatie, identiteit, cultuur, normen & waarden
+    "C – Verhouding",    # macht, democratie, rechtsstaat, politiek, criminaliteit
+    "D – Verandering",   # modernisering, globalisering, technologie
+    "E – Binding",       # sociale cohesie, groepen, netwerken, ongelijkheid, media
 ]
