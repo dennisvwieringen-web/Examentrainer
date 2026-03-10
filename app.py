@@ -10,6 +10,7 @@ Flow:
 """
 import json
 import random
+import re
 from pathlib import Path
 
 import streamlit as st
@@ -27,22 +28,72 @@ st.title(APP_TITLE)
 # Hulpfuncties
 # ---------------------------------------------------------------------------
 
+# Trefwoorden voor Domein A – Vaardigheden (onderzoeksmethoden, invalshoeken)
+_VAARDIGHEID_TREFWOORDEN = re.compile(
+    r"\b(hypothese|variabele|kwalitatief|kwantitatief|steekproef|populatie|"
+    r"representatief|observati|interview|enquête|vragenlijst|inhoudsanalys|"
+    r"literatuuronderzoek|onderzoeksmethode|betrouwbaarheid|validiteit|"
+    r"invalshoek|benaderingswijze|sociaaleconomisch|sociaal-cultureel|"
+    r"sociaalpsychologisch|politicologisch|onderzoeksopzet|operationalis)\w*",
+    re.IGNORECASE,
+)
+
+
+def _reinig_brontekst(tekst: str) -> str:
+    """Verwijdert PDF-artefacten (paginamarkeringen, herhaalde headers)."""
+    tekst = re.sub(r"\n\n--- pagina ---\n\n", "\n\n", tekst)
+    tekst = re.sub(r"VW-\S+\s*/\s*\d+\s*\nlees verder ►{1,3}", "", tekst)
+    tekst = re.sub(r"lees verder ►{1,3}", "", tekst)
+    tekst = re.sub(r"\n{3,}", "\n\n", tekst)
+    return tekst.strip()
+
+
 @st.cache_data
-def laad_alle_vragen() -> list[Vraag]:
+def laad_alle_vragen() -> tuple[list[Vraag], dict[str, dict[str, str]]]:
     """Laad alle verwerkte JSON-bestanden uit data/processed/.
-    Bronnen-bestanden (*_bronnen.json) worden overgeslagen — die bevatten
-    geen Vraag-objecten maar een dict met bronteksten."""
-    vragen = []
-    for json_bestand in DATA_DIR.glob("*.json"):
+
+    Retourneert:
+      vragen        – lijst van alle Vraag-objecten
+      bronnen_lookup – {vraag_id: {"tekst 1": "<tekst>", ...}}
+    """
+    vragen: list[Vraag] = []
+    bronnen_lookup: dict[str, dict[str, str]] = {}
+
+    for json_bestand in sorted(DATA_DIR.glob("*.json")):
         if json_bestand.name.endswith("-bronnen.json"):
             continue
-        vragen.extend(laad_vragen_uit_json(json_bestand))
-    return vragen
+
+        vraag_lijst = laad_vragen_uit_json(json_bestand)
+        vragen.extend(vraag_lijst)
+
+        # Laad bijbehorend bronnenbestand indien aanwezig
+        bronnen_bestand = DATA_DIR / (json_bestand.stem + "-bronnen.json")
+        if bronnen_bestand.exists():
+            with open(bronnen_bestand, encoding="utf-8") as f:
+                bronnen_data: dict[str, str] = json.load(f)
+
+            for vraag in vraag_lijst:
+                # Detecteer referenties: via bron_refs + scan vraag_tekst
+                refs: set[str] = set(vraag.bron_refs)
+                for m in re.finditer(r"\btekst\s+(\d+)\b", vraag.vraag_tekst, re.IGNORECASE):
+                    refs.add(f"tekst {m.group(1)}")
+
+                if refs:
+                    bronnen_lookup[vraag.id] = {
+                        label: _reinig_brontekst(bronnen_data[label])
+                        for label in sorted(refs)
+                        if label in bronnen_data
+                    }
+
+    return vragen, bronnen_lookup
 
 
 def filter_vragen(vragen: list[Vraag], domein: str) -> list[Vraag]:
     if domein == "Alle domeinen":
         return vragen
+    if domein == "Vaardigheden":
+        # Domein A loopt door alle opgaven heen: detecteer op trefwoorden
+        return [v for v in vragen if _VAARDIGHEID_TREFWOORDEN.search(v.vraag_tekst)]
     return [v for v in vragen if v.domein == domein]
 
 
@@ -58,6 +109,8 @@ if "poging" not in st.session_state:
     st.session_state.poging = 1
 if "score_p1" not in st.session_state:
     st.session_state.score_p1 = None
+if "bronnen_lookup" not in st.session_state:
+    st.session_state.bronnen_lookup = {}
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +126,8 @@ if st.session_state.stap == "login":
     if submit and naam:
         st.session_state.naam = naam
         st.session_state.domein = domein
-        alle_vragen = laad_alle_vragen()
+        alle_vragen, bronnen_lookup = laad_alle_vragen()
+        st.session_state.bronnen_lookup = bronnen_lookup
         beschikbare_vragen = filter_vragen(alle_vragen, domein)
 
         if not beschikbare_vragen:
@@ -102,6 +156,18 @@ elif st.session_state.stap == "vraag":
     st.session_state.huidige_vraag = vraag
 
     st.subheader(f"Vraag {idx + 1} / {len(pool)}  •  {vraag.domein}")
+
+    # ── Bronteksten tonen (indien van toepassing) ─────────────────────────
+    bronnen = st.session_state.bronnen_lookup.get(vraag.id, {})
+    if bronnen:
+        for label, tekst in bronnen.items():
+            with st.expander(f"📄 {label.capitalize()}", expanded=True):
+                st.markdown(
+                    f"<div style='font-size:0.9em; line-height:1.6;'>{tekst.replace(chr(10), '<br>')}</div>",
+                    unsafe_allow_html=True,
+                )
+        st.markdown("---")
+
     st.markdown(f"**{vraag.vraag_tekst}**")
     st.caption(f"Maximum: {vraag.max_punten} punt(en)  •  Poging {st.session_state.poging} van 2")
 

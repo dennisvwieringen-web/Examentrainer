@@ -41,11 +41,12 @@ GOOGLE_SHEETS_SPREADSHEET_ID = _secret("GOOGLE_SHEETS_SPREADSHEET_ID")
 APP_TITLE    = _secret("APP_TITLE", "Examencoach Maatschappijwetenschappen")
 OPENAI_MODEL = "gpt-4o"
 
-# Domeinen uit de syllabus MaWi VWO (B t/m E)
-# Domein A = Vaardigheden loopt door alle opgaven heen en is geen apart filter.
+# Domeinen uit de syllabus MaWi VWO (A t/m E)
+# Domein A = Vaardigheden wordt herkend via trefwoorden in de vraagstelling.
 DOMEINEN = [
-    "Vorming",      # B – socialisatie, identiteit, cultuur, normen & waarden
-    "Verhouding",   # C – macht, democratie, rechtsstaat, politiek, criminaliteit
-    "Verandering",  # D – modernisering, globalisering, technologie
-    "Binding",      # E – sociale cohesie, groepen, netwerken, ongelijkheid, media
+    "Vaardigheden",  # A – onderzoeksmethoden, invalshoeken, hypothesen, variabelen
+    "Vorming",       # B – socialisatie, identiteit, cultuur, normen & waarden
+    "Verhouding",    # C – macht, democratie, rechtsstaat, politiek, criminaliteit
+    "Verandering",   # D – modernisering, globalisering, technologie
+    "Binding",       # E – sociale cohesie, groepen, netwerken, ongelijkheid, media
 ]
