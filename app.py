@@ -8,6 +8,7 @@ Flow:
 4. Feedback + tweede kans.
 5. Resultaten worden gelogd in Google Sheets.
 """
+import html as _html
 import json
 import random
 import re
@@ -20,7 +21,7 @@ from src.ai_grader import beoordeel_antwoord
 from src.pdf_parser import Vraag, laad_vragen_uit_json
 from src.sheets_logger import log_resultaat
 
-st.set_page_config(page_title=APP_TITLE, layout="centered")
+st.set_page_config(page_title=APP_TITLE, layout="wide")
 st.title(APP_TITLE)
 
 
@@ -67,6 +68,27 @@ def _reinig_brontekst(tekst: str) -> str:
         alineas.append(alinea)
 
     return "\n\n".join(alineas).strip()
+
+
+def _reinig_vraag_tekst(tekst: str) -> str:
+    """Verwijdert PDF-artefacten uit vraag-teksten (paginamarkeringen, voetteksten)."""
+    tekst = re.sub(r"--- pagina ---\s*", " ", tekst)
+    tekst = re.sub(r"VW-\S+\s*/\s*\d+\s*", "", tekst)
+    tekst = re.sub(r"lees verder\s*►+\s*", "", tekst)
+    tekst = re.sub(r"\n{3,}", "\n\n", tekst)
+    return tekst.strip()
+
+
+def _als_html(tekst: str, vet: bool = False) -> str:
+    """Zet platte tekst om naar veilige HTML-paragrafen (escaped, newlines → <br>)."""
+    stijl = "font-weight:600;" if vet else ""
+    paragrafen = "".join(
+        f"<p style='margin:0 0 0.7em 0;{stijl}'>"
+        f"{_html.escape(p).replace(chr(10), '<br>')}</p>"
+        for p in tekst.split("\n\n")
+        if p.strip()
+    )
+    return paragrafen
 
 
 @st.cache_data
@@ -180,21 +202,69 @@ elif st.session_state.stap == "vraag":
 
     st.subheader(f"Vraag {idx + 1} / {len(pool)}  •  {vraag.domein}")
 
-    # ── Bronteksten tonen (indien van toepassing) ─────────────────────────
+    # ── Bronteksten scheiden: leesbare tekst vs. visueel materiaal ────────
     bronnen = st.session_state.bronnen_lookup.get(vraag.id, {})
-    if bronnen:
-        for label, tekst in bronnen.items():
-            with st.expander(f"📄 {label.capitalize()}", expanded=True):
-                # Render als nette markdown-alinea's (geen <br>-hack)
-                st.markdown(tekst)
-        st.markdown("---")
+    tekst_bronnen = {
+        k: v for k, v in bronnen.items()
+        if not v.startswith("[FIGUUR") and not v.startswith("[AFBEELDING")
+    }
+    visuele_bronnen = [k for k, v in bronnen.items()
+                       if v.startswith("[FIGUUR") or v.startswith("[AFBEELDING")]
 
-    st.markdown(f"**{vraag.vraag_tekst}**")
-    st.caption(f"Maximum: {vraag.max_punten} punt(en)  •  Poging {st.session_state.poging} van 2")
+    # ── Visuele bronnen: compacte melding ─────────────────────────────────
+    if visuele_bronnen:
+        labels = ", ".join(k.capitalize() for k in sorted(visuele_bronnen))
+        st.caption(f"📊 {labels}: visueel materiaal — raadpleeg het originele examen.")
 
-    with st.form("antwoord_form"):
-        antwoord = st.text_area("Jouw antwoord", height=150, key=f"antw_{idx}_{st.session_state.poging}")
-        submit = st.form_submit_button("Controleer antwoord")
+    # ── Layout: gesplitst leesvenster of volledig breed ───────────────────
+    if tekst_bronnen:
+        col_bron, col_vraag = st.columns([1, 1], gap="large")
+        vraag_container = col_vraag
+
+        with col_bron:
+            # Bouw scrollbaar HTML-leesvenster
+            bron_html_parts = []
+            for label, tekst in tekst_bronnen.items():
+                paragrafen = "".join(
+                    f"<p style='margin:0 0 0.85em 0;line-height:1.8;'>"
+                    f"{_html.escape(p).replace(chr(10), '<br>')}</p>"
+                    for p in tekst.split("\n\n")
+                    if p.strip()
+                )
+                bron_html_parts.append(
+                    f"<div style='margin-bottom:1.5em;'>"
+                    f"<span style='font-size:0.8em;font-weight:700;text-transform:uppercase;"
+                    f"letter-spacing:0.06em;opacity:0.55;'>📄 {_html.escape(label.capitalize())}</span>"
+                    f"<hr style='border:none;border-top:1px solid rgba(128,128,128,0.3);"
+                    f"margin:0.4em 0 0.9em;'>"
+                    f"{paragrafen}</div>"
+                )
+            st.markdown(
+                f'<div style="height:72vh;overflow-y:auto;padding:1.1rem 1.4rem;'
+                f'background:rgba(128,128,128,0.06);border-radius:10px;'
+                f'border:1px solid rgba(128,128,128,0.2);font-size:0.92em;">'
+                f'{"".join(bron_html_parts)}</div>',
+                unsafe_allow_html=True,
+            )
+    else:
+        vraag_container = st.container()
+
+    # ── Vraag tonen + antwoordformulier ───────────────────────────────────
+    vraag_tekst_schoon = _reinig_vraag_tekst(vraag.vraag_tekst)
+
+    with vraag_container:
+        st.markdown(
+            f'<div style="font-size:1em;line-height:1.75;margin-bottom:0.6em;">'
+            f'{_als_html(vraag_tekst_schoon, vet=True)}</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption(f"Maximum: {vraag.max_punten} punt(en)  •  Poging {st.session_state.poging} van 2")
+
+        with st.form("antwoord_form"):
+            antwoord = st.text_area(
+                "Jouw antwoord", height=150, key=f"antw_{idx}_{st.session_state.poging}"
+            )
+            submit = st.form_submit_button("Controleer antwoord")
 
     if submit and antwoord.strip():
         with st.spinner("AI beoordeelt jouw antwoord…"):
