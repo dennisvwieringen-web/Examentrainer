@@ -246,24 +246,33 @@ elif st.session_state.stap == "vraag":
             # Bouw scrollbaar HTML-leesvenster
             bron_html_parts = []
             for label, tekst in tekst_bronnen.items():
-                paragrafen = "".join(
-                    f"<p style='margin:0 0 0.85em 0;line-height:1.8;'>"
-                    f"{_html.escape(p.strip()).replace(chr(10), '<br>')}</p>"
-                    for p in tekst.split("\n\n")
-                    if p.strip()
-                )
+                paras = [p.strip() for p in tekst.split("\n\n") if p.strip()]
+                para_html = ""
+                for i, p in enumerate(paras):
+                    escaped = _html.escape(p).replace(chr(10), "<br>")
+                    if i == 0 and len(p) < 100:
+                        # Korte eerste alinea = artikeltitel → vet, iets groter
+                        para_html += (
+                            f"<p style='margin:0 0 0.75em 0;font-weight:700;"
+                            f"font-size:1.05em;line-height:1.45;'>{escaped}</p>"
+                        )
+                    else:
+                        para_html += (
+                            f"<p style='margin:0 0 0.9em 0;line-height:1.85;'>"
+                            f"{escaped}</p>"
+                        )
                 bron_html_parts.append(
-                    f"<div style='margin-bottom:1.5em;'>"
-                    f"<span style='font-size:0.8em;font-weight:700;text-transform:uppercase;"
-                    f"letter-spacing:0.06em;opacity:0.55;'>📄 {_html.escape(label.capitalize())}</span>"
-                    f"<hr style='border:none;border-top:1px solid rgba(128,128,128,0.3);"
-                    f"margin:0.4em 0 0.9em;'>"
-                    f"{paragrafen}</div>"
+                    f"<div style='margin-bottom:1.6em;'>"
+                    f"<span style='font-size:0.72em;font-weight:600;opacity:0.45;"
+                    f"letter-spacing:0.03em;'>📄 {_html.escape(label.capitalize())}</span>"
+                    f"<hr style='border:none;border-top:1px solid rgba(128,128,128,0.2);"
+                    f"margin:0.3em 0 1em;'>"
+                    f"{para_html}</div>"
                 )
             st.markdown(
-                f'<div style="height:72vh;overflow-y:auto;padding:1.1rem 1.4rem;'
-                f'background:rgba(128,128,128,0.06);border-radius:10px;'
-                f'border:1px solid rgba(128,128,128,0.2);font-size:0.92em;">'
+                f'<div style="height:72vh;overflow-y:auto;padding:1.2rem 1.5rem;'
+                f'background:rgba(128,128,128,0.05);border-radius:10px;'
+                f'border:1px solid rgba(128,128,128,0.18);font-size:0.93em;">'
                 f'{"".join(bron_html_parts)}</div>',
                 unsafe_allow_html=True,
             )
@@ -274,9 +283,26 @@ elif st.session_state.stap == "vraag":
     vraag_tekst_schoon = _reinig_vraag_tekst(vraag.vraag_tekst)
 
     with vraag_container:
+        # Eerste alinea(s) = de vraag zelf (vet), rest = context (normaal)
+        vraag_paras = [p.strip() for p in vraag_tekst_schoon.split("\n\n") if p.strip()]
+        vraag_html = ""
+        for i, p in enumerate(vraag_paras):
+            escaped = _html.escape(p).replace(chr(10), "<br>")
+            if i < len(vraag_paras) - 1 or len(vraag_paras) == 1:
+                # Vraag-paragrafen: vet
+                vraag_html += (
+                    f"<p style='margin:0 0 0.65em 0;font-weight:600;line-height:1.75;'>"
+                    f"{escaped}</p>"
+                )
+            else:
+                # Laatste alinea als er meerdere zijn: context (iets minder prominent)
+                vraag_html += (
+                    f"<p style='margin:0.3em 0 0.65em 0;font-weight:400;line-height:1.7;"
+                    f"opacity:0.85;font-style:italic;border-left:3px solid rgba(128,128,128,0.4);"
+                    f"padding-left:0.8em;'>{escaped}</p>"
+                )
         st.markdown(
-            f'<div style="font-size:1em;line-height:1.75;margin-bottom:0.6em;">'
-            f'{_als_html(vraag_tekst_schoon, vet=True)}</div>',
+            f'<div style="font-size:1em;margin-bottom:0.5em;">{vraag_html}</div>',
             unsafe_allow_html=True,
         )
         st.caption(f"Maximum: {vraag.max_punten} punt(en)  •  Poging {st.session_state.poging} van 2")
