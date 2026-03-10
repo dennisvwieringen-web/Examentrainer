@@ -1,0 +1,18 @@
+# Examencoach Maatschappijwetenschappen - Afhankelijkheden
+# Installeer met: pip install -r requirements.txt
+
+# Frontend
+streamlit>=1.32.0
+
+# PDF Verwerking
+PyMuPDF>=1.24.0          # Robuuste PDF parser (fitz)
+
+# AI
+openai>=1.30.0
+
+# Google Sheets
+gspread>=6.0.0
+google-auth>=2.29.0
+
+# Utilities
+python-dotenv>=1.0.0     # Laden van .env bestand

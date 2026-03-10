@@ -1,0 +1,23 @@
+# Secrets — nooit in git
+.env
+credentials.json
+.streamlit/secrets.toml
+
+# Grote binaire bestanden
+data/pdfs/
+
+# De verwerkte JSON vragenbank WEL in git (geen PDFs nodig op Streamlit Cloud)
+# data/processed/  ← bewust niet genegeerd
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# IDE / tooling
+.claude/
+.vscode/
+*.egg-info/
+dist/
+build/
