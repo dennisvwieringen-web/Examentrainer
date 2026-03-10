@@ -55,7 +55,9 @@ def _reinig_brontekst(tekst: str) -> str:
     tekst = re.sub(r"(?im)^\s*(?:tekst|figuur|afbeelding)\s+\d+\s*$", "", tekst)
 
     # ── Splits in blokken op lege regels (echte alinea-grenzen) ────────────
-    blokken = re.split(r"\n{2,}", tekst)
+    # Gebruik \n[ \t]*\n zodat ook "\n \n" (newline-spatie-newline, PDF-artefact)
+    # als alinea-scheiding wordt herkend.
+    blokken = re.split(r"\n[ \t]*\n", tekst)
 
     alineas = []
     for blok in blokken:
