@@ -41,6 +41,20 @@ def _get_werkblad() -> gspread.Worksheet:
     return werkblad
 
 
+def lees_resultaten() -> list[dict]:
+    """Leest alle rijen uit de Google Spreadsheet als lijst van dicts.
+
+    Retourneert een lege lijst als de sheet leeg is of de verbinding mislukt.
+    """
+    try:
+        werkblad = _get_werkblad()
+        rijen = werkblad.get_all_records()
+        return rijen
+    except Exception as e:
+        print(f"[Sheets] Kon resultaten niet lezen: {e}")
+        return []
+
+
 def log_resultaat(
     naam: str,
     domein: str,

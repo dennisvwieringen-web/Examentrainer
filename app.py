@@ -54,6 +54,10 @@ def _reinig_brontekst(tekst: str) -> str:
     # ── Verwijder "tekst X" / "figuur X" header-regel bovenaan ─────────────
     tekst = re.sub(r"(?im)^\s*(?:tekst|figuur|afbeelding)\s+\d+\s*$", "", tekst)
 
+    # ── Verwijder "Opgave X ..." en alles erna (volgende sectie van het examen) ──
+    # Dit lekt soms in de brontekst doordat de PDF-parser de grens niet herkent.
+    tekst = re.sub(r"\n\s*Opgave\s+\d+\b.*", "", tekst, flags=re.DOTALL)
+
     # ── Splits in blokken op lege regels (echte alinea-grenzen) ────────────
     # Gebruik \n[ \t]*\n zodat ook "\n \n" (newline-spatie-newline, PDF-artefact)
     # als alinea-scheiding wordt herkend.
@@ -87,15 +91,37 @@ def _reinig_vraag_tekst(tekst: str) -> str:
     tekst = re.sub(r"(?m)^\s*\d+\s*/\s*\d+\s*$", "", tekst)  # "8 / 9" paginanr
     tekst = re.sub(r"lees verder[^\n]*", "", tekst)           # "lees verder ►" etc.
 
+    # ── Verwijder standaard examenfooters ──────────────────────────────────
+    # "Bronvermelding Een opsomming van de in dit examen..." (standaard footer)
+    tekst = re.sub(r"(?i)\s*bronvermelding\s+een\s+opsomming.*", "", tekst)
+    # "einde" marker + eventuele nakomende symbolen / vakjes
+    tekst = re.sub(r"(?i)\s*\beinde\b[\s\W]*$", "", tekst)
+
+    # ── Herstel bullet-tekens VÓÓR het samenvoegen ─────────────────────────
+    # \uf02d = Private Use Area karakter dat PyMuPDF gebruikt voor het "–"
+    # bullet-teken in MaWi-examens (Wingdings/Symbol-lettertype in PDF).
+    # Vervang "\uf02d  \n tekst" → " – tekst" zodat de bullet-structuur bewaard blijft.
+    tekst = re.sub(r"\uf02d\s*\n\s*", " \u2013 ", tekst)   # bullet + newline → " – "
+    tekst = re.sub(r"\uf02d\s*", " \u2013 ", tekst)        # losse \uf02d → " – "
+
+    # ■ (U+25A0) wordt ook als bullet gebruikt in MaWi-examens (solid square marker).
+    # Converteer vóór de algemene verwijdering zodat de bullet-structuur bewaard blijft.
+    tekst = re.sub(r"\u25a0\s*\n\s*", " \u2013 ", tekst)   # ■ + newline → " – "
+    tekst = re.sub(r"\u25a0\s*", " \u2013 ", tekst)        # losse ■ → " – "
+
+    # Unicode vakjes, blokken, emoji-artefacten en overige Private Use Area tekens
+    tekst = re.sub(r"[\u25a1-\u25ff\u2600-\u27bf\ue000-\uf8ff]", "", tekst)
+
     # ── Voeg alle regels samen (incl. blanco regels = PDF kolomartefact) ───
     tekst = re.sub(r"[\r\n]+", " ", tekst)   # elke newline-reeks → spatie
     tekst = re.sub(r" {2,}", " ", tekst)
     tekst = tekst.strip()
 
-    # ── Splits op bronverwijzingen: "Gebruik tekst/tabel/figuur/bron N" ────
+    # ── Splits op bron-/regelverwijzingen ────────────────────────────────
+    # "Gebruik tekst/tabel/figuur/bron/regel N" → aparte alinea
     # "Gebruik in je uitleg..." matcht NIET (geen bron-sleutelwoord + cijfer)
     onderdelen = re.split(
-        r"(?i)(?=gebruik\s+(?:tekst|tabel|figuur|bron)\s+\d)",
+        r"(?i)(?=gebruik\s+(?:tekst|tabel|figuur|bron|regel)\s+\d)",
         tekst,
     )
     return "\n\n".join(p.strip() for p in onderdelen if p.strip())
@@ -111,6 +137,58 @@ def _als_html(tekst: str, vet: bool = False) -> str:
         if p.strip()
     )
     return paragrafen
+
+
+def _render_vraag_para(p: str) -> str:
+    """Rendert één vraag-alinea als HTML.
+
+    Detecteert twee soorten opsommingen:
+    1. Expliciete bullets: tekst met '– ' of '- ' (als PDF die bewaart).
+    2. Impliciete bullets: 'Gebruik in je ...: item1; item2.' — PDF verliest
+       vaak het streepje, maar de puntkomma-structuur blijft intact.
+    """
+    # ── Expliciete em-dash / koppelteken bullets ──────────────────────────
+    if " – " in p or p.startswith("– ") or p.startswith("- "):
+        intro, *items_raw = re.split(r"\s*[–-]\s+", p)
+        intro = intro.strip().rstrip(":")
+        items = [i.strip().rstrip(";.") for i in items_raw if i.strip()]
+        return _bullet_html(intro, items)
+
+    # ── Impliciete bullets: "...: item1; item2[; item3]." ────────────────
+    # Herkenbaar: colon in tekst + ≥2 items gescheiden door "; "
+    # en elk item is substantieel (≥3 woorden), niet slechts een zinsdeel.
+    colon_pos = p.rfind(":")
+    if colon_pos > 0:
+        after = p[colon_pos + 1:].strip()
+        items = [i.strip().rstrip(";.") for i in re.split(r";\s+", after) if i.strip()]
+        if len(items) >= 2 and all(len(i.split()) >= 3 for i in items):
+            intro = p[:colon_pos].strip()
+            return _bullet_html(intro, items)
+
+    escaped = _html.escape(p)
+    return (
+        f"<p style='margin:0 0 0.6em 0;font-weight:700;font-size:1.05em;"
+        f"line-height:1.7;'>{escaped}</p>"
+    )
+
+
+def _bullet_html(intro: str, items: list[str]) -> str:
+    """Rendert intro-tekst + opsomming als HTML."""
+    intro_html = ""
+    if intro:
+        intro_html = (
+            f"<p style='margin:0 0 0.45em 0;font-weight:700;font-size:1.05em;"
+            f"line-height:1.65;'>{_html.escape(intro)}:</p>"
+        )
+    items_html = "".join(
+        f"<li style='margin-bottom:0.45em;line-height:1.6;'>{_html.escape(item)}</li>"
+        for item in items
+    )
+    return (
+        f"{intro_html}"
+        f"<ul style='margin:0 0 0.7em 0;padding-left:1.5em;'>"
+        f"{items_html}</ul>"
+    )
 
 
 @st.cache_data
@@ -228,12 +306,19 @@ elif st.session_state.stap == "vraag":
     # Haal bronnen rechtstreeks uit de @st.cache_data-cache (nooit stale)
     _, bronnen_lookup = laad_alle_vragen()
     bronnen = bronnen_lookup.get(vraag.id, {})
-    tekst_bronnen = {
-        k: v for k, v in bronnen.items()
-        if not v.startswith("[FIGUUR") and not v.startswith("[AFBEELDING")
-    }
+    # Splits bronnen: puur visueel (geen toelichting) vs. toonbaar
+    def _is_figuur(v: str) -> bool:
+        return v.startswith("[FIGUUR") or v.startswith("[AFBEELDING")
+
+    def _heeft_beschrijving(v: str) -> bool:
+        return _is_figuur(v) and "\nBeschrijving:\n" in v
+
+    tekst_bronnen = {k: v for k, v in bronnen.items() if not _is_figuur(v)}
+    # Figuren mét beschrijvingstekst → toon in bron-kolom
+    tekst_bronnen.update({k: v for k, v in bronnen.items() if _heeft_beschrijving(v)})
+    # Puur visuele bronnen (geen beschrijving) → compacte melding
     visuele_bronnen = [k for k, v in bronnen.items()
-                       if v.startswith("[FIGUUR") or v.startswith("[AFBEELDING")]
+                       if _is_figuur(v) and not _heeft_beschrijving(v)]
 
     # ── Visuele bronnen: compacte melding ─────────────────────────────────
     if visuele_bronnen:
@@ -249,11 +334,24 @@ elif st.session_state.stap == "vraag":
             # Bouw scrollbaar HTML-leesvenster
             bron_html_parts = []
             for label, tekst in tekst_bronnen.items():
-                paras = [p.strip() for p in tekst.split("\n\n") if p.strip()]
+                is_figuur = tekst.startswith("[FIGUUR") or tekst.startswith("[AFBEELDING")
+                # Voor figuren: sla de eerste regel ("[FIGUUR...]) over en toon beschrijvingstekst
+                if is_figuur:
+                    toelichting_deel = tekst.split("\nBeschrijving:\n", 1)[-1]
+                    paras = [p.strip() for p in toelichting_deel.split("\n\n") if p.strip()]
+                else:
+                    paras = [p.strip() for p in tekst.split("\n\n") if p.strip()]
                 para_html = ""
                 for i, p in enumerate(paras):
                     escaped = _html.escape(p).replace(chr(10), "<br>")
-                    if i == 0 and len(p) < 100:
+                    if is_figuur and i == 0:
+                        # Label boven beschrijvingstekst van figuur
+                        para_html += (
+                            f"<p style='margin:0 0 0.5em 0;font-size:0.8em;font-weight:600;"
+                            f"color:rgba(180,140,80,0.9);text-transform:uppercase;"
+                            f"letter-spacing:0.06em;'>Beschrijving bij figuur/grafiek</p>"
+                        )
+                    if i == 0 and not is_figuur and len(p) < 100:
                         # Korte eerste alinea = artikeltitel → vet, iets groter
                         para_html += (
                             f"<p style='margin:0 0 0.75em 0;font-weight:700;"
@@ -286,29 +384,42 @@ elif st.session_state.stap == "vraag":
     vraag_tekst_schoon = _reinig_vraag_tekst(vraag.vraag_tekst)
 
     with vraag_container:
-        # Eerste alinea(s) = de vraag zelf (vet), "Gebruik X." = context (normaal)
         vraag_paras = [p.strip() for p in vraag_tekst_schoon.split("\n\n") if p.strip()]
-        vraag_html = ""
-        for p in vraag_paras:
-            escaped = _html.escape(p).replace(chr(10), "<br>")
-            # Context begint in MaWi-examens altijd met "Gebruik " (tekst/tabel/figuur)
-            is_context = p.lower().startswith("gebruik ")
-            if is_context:
-                vraag_html += (
-                    f"<p style='margin:0.5em 0 0.6em 0;font-weight:400;line-height:1.72;"
-                    f"opacity:0.82;border-left:3px solid rgba(128,128,128,0.35);"
-                    f"padding-left:0.85em;'>{escaped}</p>"
-                )
-            else:
-                vraag_html += (
-                    f"<p style='margin:0 0 0.65em 0;font-weight:600;line-height:1.75;'>"
-                    f"{escaped}</p>"
-                )
+
+        # Scheiden: context ("Gebruik ...") vs. de eigenlijke vraagtekst
+        context_paras = [p for p in vraag_paras if p.lower().startswith("gebruik ")]
+        hoofd_paras   = [p for p in vraag_paras if not p.lower().startswith("gebruik ")]
+
+        # ── Punten-badge ──────────────────────────────────────────────────────
+        punten_html = (
+            f"<div style='margin-bottom:0.75em;'>"
+            f"<span style='background:rgba(99,179,237,0.18);color:rgba(99,179,237,1);"
+            f"padding:0.18em 0.6em;border-radius:4px;font-size:0.82em;font-weight:700;"
+            f"letter-spacing:0.02em;'>{vraag.max_punten}p</span>"
+            f"<span style='font-size:0.8em;opacity:0.5;margin-left:0.5em;'>"
+            f"vraag {vraag.vraag_nummer}</span></div>"
+        )
+
+        # ── Context-alinea's (cursief, boven de vraag) ────────────────────────
+        context_html = ""
+        for p in context_paras:
+            escaped = _html.escape(p)
+            context_html += (
+                f"<p style='margin:0 0 0.55em 0;font-size:0.88em;font-style:italic;"
+                f"line-height:1.55;color:rgba(160,185,210,0.9);'>{escaped}</p>"
+            )
+
+        # ── Vraagtekst (vet, met bullet-detectie) ─────────────────────────────
+        vraag_html = "".join(_render_vraag_para(p) for p in hoofd_paras)
+
         st.markdown(
-            f'<div style="font-size:1em;margin-bottom:0.5em;">{vraag_html}</div>',
+            f'<div style="padding:1rem 1.2rem;background:rgba(99,179,237,0.06);'
+            f'border-radius:8px;border-left:4px solid rgba(99,179,237,0.55);'
+            f'margin-bottom:0.8em;">'
+            f'{punten_html}{context_html}{vraag_html}</div>',
             unsafe_allow_html=True,
         )
-        st.caption(f"Maximum: {vraag.max_punten} punt(en)  •  Poging {st.session_state.poging} van 2")
+        st.caption(f"Poging {st.session_state.poging} van 2")
 
         with st.form("antwoord_form"):
             antwoord = st.text_area(
