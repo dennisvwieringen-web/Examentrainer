@@ -41,6 +41,13 @@ GOOGLE_SHEETS_SPREADSHEET_ID = _secret("GOOGLE_SHEETS_SPREADSHEET_ID")
 APP_TITLE    = _secret("APP_TITLE", "Examencoach Maatschappijwetenschappen")
 OPENAI_MODEL = "gpt-4o"
 
+# E-mail (SMTP) instellingen
+SMTP_HOST      = _secret("SMTP_HOST",     "smtp.gmail.com")
+SMTP_PORT      = int(_secret("SMTP_PORT", "587"))
+SMTP_USER      = _secret("SMTP_USER")      # afzender e-mailadres
+SMTP_PASSWORD  = _secret("SMTP_PASSWORD")  # Gmail app-wachtwoord of SMTP-wachtwoord
+EMAIL_RECIPIENT = _secret("EMAIL_RECIPIENT", "wgn@fioretti.nl")
+
 # Domeinen uit de syllabus MaWi VWO (A t/m E)
 # Domein A = Vaardigheden wordt herkend via trefwoorden in de vraagstelling.
 DOMEINEN = [

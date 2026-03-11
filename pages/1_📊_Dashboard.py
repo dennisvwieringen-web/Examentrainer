@@ -1,8 +1,8 @@
 """
 Docent Dashboard — Examencoach Maatschappijwetenschappen
 
-Toont een overzicht van leerlinggebruik op basis van de Google Sheets-log.
-Navigeer via de zijbalk naar deze pagina.
+Toont wie de examencoach heeft gebruikt en wanneer.
+Stuurt op verzoek een overzicht per mail naar de docent.
 """
 import sys
 from pathlib import Path
@@ -11,123 +11,69 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from config import APP_TITLE
+from config import APP_TITLE, EMAIL_RECIPIENT
 from src.sheets_logger import lees_resultaten
+from src.email_sender import stuur_overzicht
 
-st.set_page_config(page_title=f"Dashboard — {APP_TITLE}", layout="wide")
-st.title("📊 Docent Dashboard")
-st.caption("Overzicht van leerlinggebruik van de Examencoach")
+st.set_page_config(page_title=f"Dashboard — {APP_TITLE}", layout="centered")
+st.title("📊 Leerlingoverzicht")
+st.caption("Wie heeft de Examencoach gebruikt en wanneer?")
 
-# ---------------------------------------------------------------------------
-# Data laden
-# ---------------------------------------------------------------------------
-
-with st.spinner("Resultaten laden uit Google Sheets…"):
+# ── Data laden ───────────────────────────────────────────────────────────────
+with st.spinner("Resultaten ophalen…"):
     rijen = lees_resultaten()
 
 if not rijen:
-    st.info(
-        "Nog geen resultaten beschikbaar. "
-        "Leerlingen worden zichtbaar nadat ze een vraag hebben beantwoord."
-    )
+    st.info("Nog geen gebruik geregistreerd. Zodra een leerling een vraag beantwoordt, verschijnt die hier.")
     st.stop()
 
-# ---------------------------------------------------------------------------
-# Verwerking
-# ---------------------------------------------------------------------------
-
-import datetime
-from collections import defaultdict
-
-leerlingen: dict[str, dict] = defaultdict(lambda: {
-    "sessies": set(),
-    "vragen": 0,
-    "score_p1_totaal": 0,
-    "score_p1_teller": 0,
-    "domeinen": set(),
-    "laatste_activiteit": "",
-})
-
+# ── Overzichtstabel: per leerling ─────────────────────────────────────────────
+leerlingen: dict[str, dict] = {}
 for rij in rijen:
-    naam = str(rij.get("Naam", "")).strip()
+    naam     = str(rij.get("Naam", "")).strip()
+    tijdstip = str(rij.get("Tijdstempel", ""))
+    domein   = str(rij.get("Domein", ""))
     if not naam:
         continue
-    datum = str(rij.get("Tijdstempel", ""))[:10]  # "YYYY-MM-DD"
-    domein = str(rij.get("Domein", ""))
-    score_p1 = rij.get("Poging 1 Score")
+    if naam not in leerlingen:
+        leerlingen[naam] = {"eerste": tijdstip, "laatste": tijdstip, "vragen": 0, "domeinen": set()}
+    leerlingen[naam]["vragen"] += 1
+    leerlingen[naam]["domeinen"].add(domein)
+    if tijdstip < leerlingen[naam]["eerste"]:
+        leerlingen[naam]["eerste"] = tijdstip
+    if tijdstip > leerlingen[naam]["laatste"]:
+        leerlingen[naam]["laatste"] = tijdstip
 
-    l = leerlingen[naam]
-    l["sessies"].add(datum)
-    l["vragen"] += 1
-    l["domeinen"].add(domein)
-    if datum > l["laatste_activiteit"]:
-        l["laatste_activiteit"] = datum
-    if score_p1 not in (None, ""):
-        try:
-            l["score_p1_totaal"] += int(score_p1)
-            l["score_p1_teller"] += 1
-        except (ValueError, TypeError):
-            pass
+tabel = [
+    {
+        "Naam":            naam,
+        "Eerste gebruik":  info["eerste"],
+        "Laatste gebruik": info["laatste"],
+        "Vragen":          info["vragen"],
+        "Domeinen":        ", ".join(sorted(info["domeinen"])),
+    }
+    for naam, info in sorted(leerlingen.items())
+]
 
-# ---------------------------------------------------------------------------
-# KPI-blokken
-# ---------------------------------------------------------------------------
+st.metric("Leerlingen", len(leerlingen))
+st.dataframe(tabel, use_container_width=True, hide_index=True)
 
-totaal_leerlingen = len(leerlingen)
-totaal_vragen = sum(l["vragen"] for l in leerlingen.values())
-actief_vandaag = sum(
-    1 for l in leerlingen.values()
-    if l["laatste_activiteit"] == datetime.date.today().strftime("%Y-%m-%d")
-)
-
-col1, col2, col3 = st.columns(3)
-col1.metric("Leerlingen totaal", totaal_leerlingen)
-col2.metric("Vragen beantwoord", totaal_vragen)
-col3.metric("Actief vandaag", actief_vandaag)
-
-st.divider()
-
-# ---------------------------------------------------------------------------
-# Leerlingtabel
-# ---------------------------------------------------------------------------
-
-st.subheader("Leerlingen")
-
-tabel_data = []
-for naam, l in sorted(leerlingen.items()):
-    gem_score = (
-        round(l["score_p1_totaal"] / l["score_p1_teller"], 1)
-        if l["score_p1_teller"] > 0 else "—"
+# ── Recente activiteit ────────────────────────────────────────────────────────
+with st.expander("Alle activiteit (tijdlijn)"):
+    tijdlijn = sorted(
+        [{"Tijdstip": r.get("Tijdstempel",""), "Naam": r.get("Naam",""), "Domein": r.get("Domein","")}
+         for r in rijen if r.get("Naam","").strip()],
+        key=lambda x: x["Tijdstip"],
+        reverse=True,
     )
-    tabel_data.append({
-        "Naam": naam,
-        "Vragen": l["vragen"],
-        "Sessies": len(l["sessies"]),
-        "Gem. score (p1)": gem_score,
-        "Domeinen": ", ".join(sorted(l["domeinen"])),
-        "Laatste activiteit": l["laatste_activiteit"],
-    })
+    st.dataframe(tijdlijn, use_container_width=True, hide_index=True)
 
-st.dataframe(tabel_data, use_container_width=True, hide_index=True)
-
-# ---------------------------------------------------------------------------
-# Domein-verdeling
-# ---------------------------------------------------------------------------
-
-st.subheader("Vragen per domein")
-
-domein_teller: dict[str, int] = defaultdict(int)
-for rij in rijen:
-    d = str(rij.get("Domein", "")).strip()
-    if d:
-        domein_teller[d] += 1
-
-domein_df = [{"Domein": k, "Vragen": v} for k, v in sorted(domein_teller.items())]
-st.bar_chart({r["Domein"]: r["Vragen"] for r in domein_df})
-
-# ---------------------------------------------------------------------------
-# Ruwe data (inklapbaar)
-# ---------------------------------------------------------------------------
-
-with st.expander("Alle resultaten (ruwe data)"):
-    st.dataframe(rijen, use_container_width=True, hide_index=True)
+# ── Mailknop ─────────────────────────────────────────────────────────────────
+st.divider()
+if st.button(f"📧 Stuur overzicht naar {EMAIL_RECIPIENT}", type="primary"):
+    with st.spinner("E-mail verzenden…"):
+        try:
+            stuur_overzicht(rijen)
+            st.success(f"✅ Overzicht verstuurd naar **{EMAIL_RECIPIENT}**")
+        except Exception as fout:
+            st.error(f"❌ Verzenden mislukt: {fout}")
